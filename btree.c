@@ -1,13 +1,14 @@
 #include <stdlib.h>
-#include <stdbool.h>
 #include <limits.h>
 #include <stdio.h>
 #include <time.h>
-#define M 128
-#define T 64
+#include <string.h>
+#define M 4
+#define T 2
+#define KEY_SIZE 16
 
 typedef struct btreenode {
-    int keys[M - 1];
+    unsigned char keys[M - 1][KEY_SIZE];
     void* values[M - 1];
     struct btreenode* children[M];
     int nOKeys;
@@ -22,21 +23,25 @@ typedef struct tree {
 // create functions
 void initTree(btree* tree); 
 btnode* btree_createNode(btree* tree);
-btnode* btree_createNodeWithVal(btree* tree, int key, void* value);
+btnode* btree_createNodeWithVal(btree* tree, const unsigned char* key, void* value);
 
 // main operations
-void btree_insert(btree* tree, int key, void* value);
-btnode* btree_insertIntoNode(btree* tree, btnode* node, int key, void* value);
-int btree_search(btnode* root, int key);
+void btree_insert(btree* tree, const unsigned char* key, void* value);
+btnode* btree_insertIntoNode(btree* tree, btnode* node, const unsigned char* key, void* value);
+int btree_search(btnode* root, const unsigned char* key);
 
 // support functions
-int binarySearchPos(btnode* node, int key);
+int binarySearchPos(btnode* node, const unsigned char* key);
 void btree_splitNode(btree* tree, btnode* node, btnode* newRoot, int pos);
 void printBtree(btnode* root);
 void moveKeyAndVal(btnode* from, int fromIdx, btnode* to, int toIdx);
 
 // free tree 
 void freeTree(btnode* root);
+
+int compareKeys(const unsigned char* key1, const unsigned char* key2) {
+    return memcmp(key1, key2, KEY_SIZE);
+}
 
 // 验证 B 树结构的函数
 void verifyBTree(btnode* node, int t, int m, bool is_root) {
@@ -65,7 +70,7 @@ void verifyBTree(btnode* node, int t, int m, bool is_root) {
     }
     // 验证关键字顺序
     for (int i = 0; i < node->nOKeys - 1; i++) {
-        if (node->keys[i] >= node->keys[i + 1]) {
+        if (compareKeys(node->keys[i], node->keys[i + 1]) >= 0) {
             printf("Error: Keys are not in ascending order.\n");
             exit(1);
         }
@@ -80,41 +85,94 @@ int main(void) {
     // 初始化 B 树
     btree tree;
     initTree(&tree);
-    // 插入测试
-    printf("Inserting elements...\n");
-    int insertElements[] = {10, 88, 30, 40, 34, 373, 3, 80, 90, 81};
-    int insertLen = sizeof(insertElements) / sizeof(insertElements[0]);
+
+    // 创建测试用的key
+    unsigned char testKey[KEY_SIZE] = {0};
+
+    // 1. 基本插入测试
+    printf("1. Basic insertion test...\n");
+    int insertValues[] = {10, 88, 30, 40, 34, 99, 3, 80, 90, 81};
+    int insertLen = sizeof(insertValues) / sizeof(insertValues[0]);
+
     for (int i = 0; i < insertLen; i++) {
-        btree_insert(&tree, insertElements[i], NULL);
+        memset(testKey, 0, KEY_SIZE);
+        // 将整数转换为字节数组，保持有序性
+        snprintf((char*)testKey, KEY_SIZE, "%d", insertValues[i]);
+        // printf("%s\n", testKey);
+        btree_insert(&tree, testKey, NULL);
+        printf("Tree after inserting %s:\n", testKey);
+        printBtree(tree.root);
+        printf("\n");
     }
-    printf("Tree after insertions:\n");
+    
+    printf("Tree after basic insertions:\n");
     printBtree(tree.root);
-    printf("\n");
-    // 查找测试
-    printf("Searching for elements...\n");
-    int searchElements[] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 150};
-    int searchLen = sizeof(searchElements) / sizeof(searchElements[0]);
+    printf("\n\n");
+
+    // 2. 查找测试
+    printf("2. Search test...\n");
+    int searchValues[] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 150};
+    int searchLen = sizeof(searchValues) / sizeof(searchValues[0]);
+
     for (int i = 0; i < searchLen; i++) {
-        int result = btree_search(tree.root, searchElements[i]);
-        if (result == 0) {
-            printf("Key %d found.\n", searchElements[i]);
-        } else {
-            printf("Key %d not found.\n", searchElements[i]);
-        }
+        memset(testKey, 0, KEY_SIZE);
+        snprintf((char*)testKey, KEY_SIZE, "%d", searchValues[i]);
+        int result = btree_search(tree.root, testKey);
+        printf("Search for value %s: %s\n", 
+               testKey, 
+               result == 0 ? "Found" : "Not found");
     }
-    // 随机插入测试
-    printf("Random insertions...\n");
+
+    printf("\n");
+
+    // 3. 随机插入测试
+    printf("3. Random insertion test...\n");
     srand(time(NULL));
     int randomOperations = 1000;
+    int* randomValues = (int*)malloc(sizeof(int) * randomOperations);
+    
     for (int i = 0; i < randomOperations; i++) {
-        int randomKey = rand() % 1000;
-        btree_insert(&tree, randomKey, NULL);
+        randomValues[i] = rand() % 1000;  // 生成0-9999的随机数
+        memset(testKey, 0, KEY_SIZE);
+        snprintf((char*)testKey, KEY_SIZE, "%d", randomValues[i]);
+        btree_insert(&tree, testKey, NULL);
+        
+        if (i % 100 == 0) {
+            printf("Inserted %d random elements\n", i);
+            // 验证树的结构
+            verifyBTree(tree.root, T, M, true);
+        }
     }
-    printf("Tree after random insertions:\n");
     printBtree(tree.root);
-    printf("\n");
+    
+    // 4. 验证随机插入后的查找
+    printf("\n4. Verifying random insertions...\n");
+    int successCount = 0;
+    for (int i = 0; i < 100; i++) {  // 测试前100个随机插入的值
+        memset(testKey, 0, KEY_SIZE);
+        int tempVal = randomValues[i];
+        snprintf((char*)testKey, KEY_SIZE, "%d", randomValues[i]);
+        if (btree_search(tree.root, testKey) == 0) {
+            successCount++;
+        }
+    }
+    printf("Successfully found %d out of 100 randomly inserted values\n", successCount);
+
+    // 5. 边界测试
+    printf("\n5. Boundary test...\n");
+    // 测试空字符串
+    memset(testKey, 0, KEY_SIZE);
+    printf("Inserting empty string\n");
+    btree_insert(&tree, testKey, NULL);
+
+    // 测试最大长度字符串
+    memset(testKey, 0, KEY_SIZE);
+    snprintf((char*)testKey, KEY_SIZE, "%d", 999999999);
+    printf("Inserting large number: %s\n", testKey);
+    btree_insert(&tree, testKey, NULL);
+
     // 验证树的结构
-    printf("Verifying tree structure...\n");
+    printf("\nFinal tree verification...\n");
     verifyBTree(tree.root, T, M, true);
     printf("Tree structure is valid.\n");
 
@@ -137,15 +195,15 @@ btnode* btree_createNode(btree* tree) {
     return node;
 }
 
-btnode* btree_createNodeWithVal(btree* tree, int key, void* value) {
+btnode* btree_createNodeWithVal(btree* tree, const unsigned char* key, void* value) {
     btnode *node = btree_createNode(tree);
-    node->keys[0] = key;
+    memcpy(node->keys[0], key, KEY_SIZE);
     node->values[0] = value;
     node->nOKeys = 1;
     return node;
 }
 
-void btree_insert(btree* tree, int key, void* value) {
+void btree_insert(btree* tree, const unsigned char* key, void* value) {
     if (!tree->root) {
         tree->root = btree_createNodeWithVal(tree, key, value);
     }
@@ -157,11 +215,11 @@ void btree_insert(btree* tree, int key, void* value) {
     }
 }
 
-btnode* btree_insertIntoNode(btree* tree, btnode* node, int key, void* value) {
+btnode* btree_insertIntoNode(btree* tree, btnode* node, const unsigned char* key, void* value) {
     int pos = binarySearchPos(node, key);
     // pos points to a new suggested position, current keys[pos] is bigger than key
     // points to a proper child
-    if (node->keys[pos] == key) {
+    if (pos < node->nOKeys && compareKeys(node->keys[pos], key) == 0) {
         // key already inserted
         return NULL;
     }
@@ -182,7 +240,7 @@ btnode* btree_insertIntoNode(btree* tree, btnode* node, int key, void* value) {
                 moveKeyAndVal(node, i - 1, node, i);
             }
             // insert key
-            node->keys[pos] = key;
+            memcpy(node->keys[pos], key, KEY_SIZE);
             node->values[pos] = value;
             node->nOKeys++;
         }
@@ -205,7 +263,7 @@ btnode* btree_insertIntoNode(btree* tree, btnode* node, int key, void* value) {
                     moveKeyAndVal(node, i - 1, node, i);
                 }
                 // insert key
-                node->keys[pos] = ret->keys[0];
+                memcpy(node->keys[pos], ret->keys[0], KEY_SIZE);
                 node->values[pos] = ret->values[0];
                 // right shift children
                 // pos + 1 because the child at pos is already equal to the child that we split, we do not need to move it
@@ -228,15 +286,16 @@ btnode* btree_insertIntoNode(btree* tree, btnode* node, int key, void* value) {
     return ret;
 }
 
-int binarySearchPos(btnode* node, int key) {
+int binarySearchPos(btnode* node, const unsigned char* key) {
     int left = 0;
     int right = node->nOKeys - 1;
     while (left <= right) {
         int mid = left + (right - left) / 2;
-        if (node->keys[mid] == key) {
+        int cmp = compareKeys(node->keys[mid], key);
+        if (cmp == 0) {
             return mid;
         }
-        else if (node->keys[mid] > key) {
+        else if (cmp > 0) {
             right = mid - 1;
         }
         else {
@@ -275,7 +334,6 @@ void btree_splitNode(btree* tree, btnode* node, btnode* newRoot, int pos) {
         // left shift elements to fill in the gap at t - 1
         // pos - 1 as at pos there is an element that is more than key, so it has to stay to the right of it and not get shifted
         for (int i = tree->t - 1; i < pos - 1; i++) {
-            node->keys[i] = node->keys[i + 1];
             moveKeyAndVal(node, i + 1, node, i);
         }
         // insert our key
@@ -283,7 +341,6 @@ void btree_splitNode(btree* tree, btnode* node, btnode* newRoot, int pos) {
     }
     else {
         // our key will be popped up
-        tmp->keys[0] = newRoot->keys[0]; // useless but good for visualization
         moveKeyAndVal(newRoot, 0, tmp, 0);
     }
     // put the element that will be upshifted in the new root
@@ -293,7 +350,7 @@ void btree_splitNode(btree* tree, btnode* node, btnode* newRoot, int pos) {
     // divide the keys between the children
     for (int i = tree->t - 1; i < tree->m - 1; i++) {
         moveKeyAndVal(newRoot->children[0], i, newRoot->children[1], i - tree->t + 1);
-        newRoot->children[0]->keys[i] = INT_MAX;
+        memset(newRoot->children[0]->keys[i], 0xFF, KEY_SIZE);
     }
     if (hasChildren) {
         if (pos < tree->t - 1) {
@@ -340,6 +397,7 @@ void btree_splitNode(btree* tree, btnode* node, btnode* newRoot, int pos) {
     newRoot->nOChildren = 2;
     newRoot->nOKeys = 1;
     free(tmp);
+    tmp = NULL;
 }
 
 void printBtree(btnode *root)
@@ -350,7 +408,7 @@ void printBtree(btnode *root)
             if (root->nOChildren){
                 printBtree(root->children[i]);
             }
-            printf(" %d ", root->keys[i]);
+            printf(" %s ", root->keys[i]);
         }
         if (root->nOChildren){
             printBtree(root->children[root->nOKeys]);
@@ -373,10 +431,10 @@ void freeTree(btnode* root) {
     
 }
 
-int btree_search(btnode* root, int key) {
+int btree_search(btnode* root, const unsigned char* key) {
     int pos = binarySearchPos(root, key);
-    if (root->keys[pos] == key) {
-        printf("Found %d\n", key);
+    if (pos < root->nOKeys && compareKeys(root->keys[pos], key) == 0) {
+        printf("Found %s\n", key);
         return 0;
     }
     else {
@@ -384,7 +442,7 @@ int btree_search(btnode* root, int key) {
             return btree_search(root->children[pos], key);
         }
         else {
-            printf("No key %d in the tree\n", key);
+            printf("No key %s in the tree\n", key);
             return 1;
         }
     }
@@ -392,6 +450,6 @@ int btree_search(btnode* root, int key) {
 }
 
 void moveKeyAndVal(btnode* from, int fromIdx, btnode* to, int toIdx) {
-    to->keys[toIdx] = from->keys[fromIdx];
+    memcpy(to->keys[toIdx], from->keys[fromIdx], KEY_SIZE);
     to->values[toIdx] = from->values[fromIdx];
 }
